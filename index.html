@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SwapNorm — DEX на Base</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        body {
+            background-color: #0b0f19;
+            color: #f1f5f9;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .dex-container {
+            background-color: #1e293b;
+            border-radius: 20px;
+            padding: 24px;
+            width: 420px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            border: 1px solid #334155;
+        }
+        .dex-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .dex-title {
+            font-size: 22px;
+            font-weight: 700;
+            color: #38bdf8;
+        }
+        .connect-btn {
+            background-color: #3b82f6;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .connect-btn:hover {
+            background-color: #2563eb;
+        }
+        .swap-box {
+            background-color: #0f172a;
+            border-radius: 14px;
+            padding: 16px;
+            margin-bottom: 12px;
+            border: 1px solid #1e293b;
+        }
+        .swap-box label {
+            font-size: 13px;
+            color: #94a3b8;
+            display: block;
+            margin-bottom: 6px;
+        }
+        .input-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .swap-input {
+            background: transparent;
+            border: none;
+            color: #ffffff;
+            font-size: 24px;
+            width: 60%;
+            outline: none;
+        }
+        .token-select {
+            background-color: #334155;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            outline: none;
+        }
+        .action-btn {
+            width: 100%;
+            background-color: #3b82f6;
+            color: white;
+            border: none;
+            padding: 16px;
+            border-radius: 14px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+            margin-top: 10px;
+        }
+        .action-btn:hover {
+            background-color: #2563eb;
+        }
+        .status-log {
+            margin-top: 15px;
+            font-size: 13px;
+            color: #cbd5e1;
+            background: #0f172a;
+            padding: 10px;
+            border-radius: 8px;
+            word-break: break-all;
+            max-height: 100px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+
+<div class="dex-container">
+    <div class="dex-header">
+        <div class="dex-title">SwapNorm</div>
+        <button id="connectWalletBtn" class="connect-btn" onclick="connectWallet()">Подключить</button>
+    </div>
+
+    <div class="swap-box">
+        <label>Продаете</label>
+        <div class="input-row">
+            <input type="number" id="amountIn" class="swap-input" placeholder="0.0">
+            <select id="tokenIn" class="token-select">
+                <option value="ETH">ETH</option>
+                <option value="USDC">USDC</option>
+                <option value="USDbC">USDbC</option>
+                <option value="DAI">DAI</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="swap-box">
+        <label>Получаете (приблизительно)</label>
+        <div class="input-row">
+            <input type="number" id="amountOut" class="swap-input" placeholder="0.0" disabled>
+            <select id="tokenOut" class="token-select">
+                <option value="USDC">USDC</option>
+                <option value="ETH">ETH</option>
+                <option value="USDbC">USDbC</option>
+                <option value="DAI">DAI</option>
+            </select>
+        </div>
+    </div>
+
+    <button class="action-btn" onclick="executeRealSwap()">Выполнить обмен</button>
+
+    <div id="statusLog" class="status-log" style="display:none;">Лог транзакции появится здесь...</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+<script>
+    const CONTRACT_ADDRESS = "0x002B4e7c39865d03E27D618A2AF2Bd8C54EDd549";
+    
+    const TOKEN_ADDRESSES = {
+        "ETH": "0x4200000000000000000000000000000000000006",
+        "USDC": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "USDbC": "0xd9aAEc86B65D86f6a7B5B1b0c42FFA531710b6Ca",
+        "DAI": "0x50c5725949A6F0c72E6C4a641F24049A917DB0cb"
+    };
+
+    const CONTRACT_ABI = [
+        "function executeSwap(address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOutMin, bool isEthIn) external payable"
+    ];
+
+    let provider, signer, userAddress;
+
+    async function connectWallet() {
+        if (window.ethereum) {
+            try {
+                provider = new ethers.providers.Web3Provider(window.ethereum);
+                await provider.send("eth_requestAccounts", []);
+                
+                const network = await provider.getNetwork();
+                if (network.chainId !== 8453) {
+                    alert("Пожалуйста, переключите сеть в MetaMask на Base!");
+                    try {
+                        await window.ethereum.request({
+                            method: 'wallet_switchEthereumChain',
+                            params: [{ chainId: '0x2105' }],
+                        });
+                    } catch (switchError) {
+                        return;
+                    }
+                }
+
+                signer = provider.getSigner();
+                userAddress = await signer.getAddress();
+                
+                const btn = document.getElementById("connectWalletBtn");
+                btn.innerText = userAddress.substring(0, 6) + "..." + userAddress.substring(38);
+                logStatus("Кошелек успешно подключен!");
+            } catch (error) {
+                console.error(error);
+                alert("Ошибка подключения кошелька.");
+            }
+        } else {
+            alert("Установите MetaMask или Coinbase Wallet!");
+        }
+    }
+
+    async function executeRealSwap() {
+        if (!signer) {
+            alert("Сначала подключите кошелек!");
+            return;
+        }
+
+        const amountInVal = document.getElementById("amountIn").value;
+        const tokenInKey = document.getElementById("tokenIn").value;
+        const tokenOutKey = document.getElementById("tokenOut").value;
+
+        if (!amountInVal || amountInVal <= 0) {
+            alert("Введите корректную сумму для обмена!");
+            return;
+        }
+
+        if (tokenInKey === tokenOutKey) {
+            alert("Нельзя обменивать одинаковые токены!");
+            return;
+        }
+
+        try {
+            logStatus("Подготовка транзакции...");
+            const parsedAmountIn = ethers.utils.parseUnits(amountInVal, 18);
+            const tokenInAddr = TOKEN_ADDRESSES[tokenInKey];
+            const tokenOutAddr = TOKEN_ADDRESSES[tokenOutKey];
+            const isEth = (tokenInKey === "ETH");
+
+            const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+
+            logStatus("Подтвердите транзакцию в вашем кошельке...");
+            
+            const tx = await contract.executeSwap(
+                tokenInAddr,
+                tokenOutAddr,
+                parsedAmountIn,
+                0, 
+                isEth,
+                { value: isEth ? parsedAmountIn : 0 }
+            );
+
+            logStatus(`Транзакция отправлена! Хеш: ${tx.hash}`);
+            await tx.wait();
+            logStatus("Обмен успешно выполнен в сети Base! 🎉");
+
+        } catch (err) {
+            console.error(err);
+            logStatus("Ошибка: " + (err.reason || err.message));
+        }
+    }
+
+    function logStatus(text) {
+        const logBox = document.getElementById("statusLog");
+        logBox.style.display = "block";
+        logBox.innerText = text;
+    }
+</script>
+
+</body>
+</html>
